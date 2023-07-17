@@ -108,7 +108,7 @@ services:
   service_two_api:
     container_name: service_two_api
     build:
-      context: ./service-one/
+      context: .
     ports:
       - '8304:8004'
     command:
@@ -126,7 +126,7 @@ services:
   service_two_worker:
     container_name: service_two_worker
     build:
-      context: ./service-one/
+      context: .
       args:
         - GHP_TOKEN=$GH_TOKEN
     ports:
