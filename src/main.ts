@@ -2,7 +2,16 @@ import express from 'express';
 import config from "config";
 import {getLogger} from "./logger";
 import axios from "axios";
-import {baggageEntryMetadataFromString, Context, context, propagation, ROOT_CONTEXT, trace} from "@opentelemetry/api";
+import {
+    baggageEntryMetadataFromString,
+    Context,
+    context,
+    propagation,
+    ROOT_CONTEXT,
+    Span,
+    trace
+} from "@opentelemetry/api";
+import {AttributeNames} from "@opentelemetry/instrumentation-express";
 
 const app: express.Application = express();
 const port = config.get<number>('server.port');
@@ -18,6 +27,7 @@ export interface IEventPayload {
 export enum EVENT_TYPE {
     PING = 'ping',
 }
+
 export interface PingMessage {
     eventType: EVENT_TYPE.PING;
     payload: IEventPayload;
@@ -42,7 +52,7 @@ function doWork(parent) {
     // new context based on current, with key/values added to baggage
     const ctx: Context = propagation.setBaggage(
         context.active(),
-        propagation.createBaggage({ 'app.username': { value: 'carluccyo' } })
+        propagation.createBaggage({'app.username': {value: 'carluccyo'}})
     );
 
     // within the new context, do some work and baggage will be
@@ -55,9 +65,9 @@ function doWork(parent) {
     });
 
 
-    const baggages = propagation.createBaggage({ key1: { value: 'value1' } });
+    const baggages = propagation.createBaggage({key1: {value: 'value1'}});
     const tracer = trace.getTracer("my-application", "0.1.0");
-    const span =  tracer.startSpan('doWork', undefined, ctx);
+    const span = tracer.startSpan('doWork', undefined, ctx);
 
     propagation.setBaggage(ctx, baggages);
     console.log(propagation.getBaggage(ctx));
@@ -71,32 +81,16 @@ app.get('/ping', async (_req, _res) => {
     // log current timestamp
     logger.info({headers: _req.headers}, `ping: ${Date.now()}`);
 
-    const ctx: Context = propagation.setBaggage(
-        ROOT_CONTEXT,
-        propagation.createBaggage({ 'app.username': { value: 'carluccyo-root-context' } })
-    );
 
-    const tracer = trace.getTracer('default');
-    tracer.startActiveSpan('main', (span) => {
-        span.setAttribute('app.username', 'carluccyo'); // add to current span
-
-        // new context based on current, with key/values added to baggage
-        const ctx: Context = propagation.setBaggage(
-            context.active(),
-            propagation.createBaggage({ 'app.username': { value: 'carluccyo' } })
-        );
-
-        // within the new context, do some work and baggage will be
-        // applied as attributes on child spans
-        context.with(ctx, () => {
-            tracer.startActiveSpan('childSpan', (childSpan) => {
-                doTheWork();
-                childSpan.end();
-            });
-        });
-
-        span.end();
-    });
+    const baggage = propagation.getBaggage(context.active());
+    let span;
+    if (baggage?.getEntry('app.username')?.value) {
+        logger.info(`found active baggage: ${JSON.stringify(baggage.getAllEntries())}`);
+    } else {
+        // continue current trace/span
+        span = trace.getSpan(context.active()) as Span;
+        span.setAttribute('app.username', 'carluccyo');
+    }
 
     const pingConfig = config.get<PingConfig>('ping');
     if (pingConfig?.enabled) {
