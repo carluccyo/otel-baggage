@@ -2,7 +2,7 @@ import express from 'express';
 import config from "config";
 import {getLogger} from "./logger";
 import axios from "axios";
-import {baggageEntryMetadataFromString, context, propagation} from "@opentelemetry/api";
+import {baggageEntryMetadataFromString, Context, context, propagation, ROOT_CONTEXT, trace} from "@opentelemetry/api";
 
 const app: express.Application = express();
 const port = config.get<number>('server.port');
@@ -32,29 +32,71 @@ export interface PingConfig {
 }
 
 
+const doTheWork = () => {
+    const index = 0;
+    logger.info(`index: ${index}`);
+}
+
+function doWork(parent) {
+
+    // new context based on current, with key/values added to baggage
+    const ctx: Context = propagation.setBaggage(
+        context.active(),
+        propagation.createBaggage({ 'app.username': { value: 'carluccyo' } })
+    );
+
+    // within the new context, do some work and baggage will be
+    // applied as attributes on child spans
+    context.with(ctx, () => {
+        tracer.startActiveSpan('childSpan', (childSpan) => {
+            doTheWork();
+            childSpan.end();
+        });
+    });
+
+
+    const baggages = propagation.createBaggage({ key1: { value: 'value1' } });
+    const tracer = trace.getTracer("my-application", "0.1.0");
+    const span =  tracer.startSpan('doWork', undefined, ctx);
+
+    propagation.setBaggage(ctx, baggages);
+    console.log(propagation.getBaggage(ctx));
+
+    span.end();
+}
+
+
 // Handling '/' Request
 app.get('/ping', async (_req, _res) => {
     // log current timestamp
     logger.info({headers: _req.headers}, `ping: ${Date.now()}`);
 
-    const payload: IEventPayload = {
-        timestamp: new Date(),
-    };
+    const ctx: Context = propagation.setBaggage(
+        ROOT_CONTEXT,
+        propagation.createBaggage({ 'app.username': { value: 'carluccyo-root-context' } })
+    );
 
-    const entries = {
-        'cf-ray': { value: 'd4cda95b652f4a1592b449d5929fda1b' },
-        'with/slash': { value: 'with spaces' },
-        key3: { value: 'c88815a7-0fa9-4d95-a1f1-cdccce3c5c2a' },
-        key4: {
-            value: 'foo',
-            metadata: baggageEntryMetadataFromString(
-                'key4prop1=value1;key4prop2=value2;key4prop3WithNoValue',
-            ),
-        },
-    };
+    const tracer = trace.getTracer('default');
+    tracer.startActiveSpan('main', (span) => {
+        span.setAttribute('app.username', 'carluccyo'); // add to current span
 
-    const baggage = propagation.createBaggage(entries);
-    propagation.setBaggage(context.active(), baggage);
+        // new context based on current, with key/values added to baggage
+        const ctx: Context = propagation.setBaggage(
+            context.active(),
+            propagation.createBaggage({ 'app.username': { value: 'carluccyo' } })
+        );
+
+        // within the new context, do some work and baggage will be
+        // applied as attributes on child spans
+        context.with(ctx, () => {
+            tracer.startActiveSpan('childSpan', (childSpan) => {
+                doTheWork();
+                childSpan.end();
+            });
+        });
+
+        span.end();
+    });
 
     const pingConfig = config.get<PingConfig>('ping');
     if (pingConfig?.enabled) {
