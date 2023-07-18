@@ -103,8 +103,9 @@ services:
     environment:
       - OTEL_SERVICE_NAME=service_one_worker
     profiles:
-      - all
-      - service_one
+        - do-not-start
+#      - all
+#      - service_one
   service_two_api:
     container_name: service_two_api
     build:

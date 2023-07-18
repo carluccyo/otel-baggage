@@ -82,24 +82,34 @@ app.get('/ping', async (_req, _res) => {
     logger.info({headers: _req.headers}, `ping: ${Date.now()}`);
 
 
-    const baggage = propagation.getBaggage(context.active());
-    let span;
-    if (baggage?.getEntry('app.username')?.value) {
-        logger.info(`found active baggage: ${JSON.stringify(baggage.getAllEntries())}`);
-    } else {
-        // continue current trace/span
-        span = trace.getSpan(context.active()) as Span;
-        span.setAttribute('app.username', 'carluccyo');
-    }
+    const tracer = trace.getTracer(
+        'my-service-tracer'
+    );
 
-    const pingConfig = config.get<PingConfig>('ping');
-    if (pingConfig?.enabled) {
-        const axiosResponse = await axios.get(pingConfig.target_service_url);
-        logger.info({status: axiosResponse.status, body: axiosResponse.data}, 'ping response');
-    }
+    await tracer.startActiveSpan('main', async (span) => {
+
+        let activeBaggage = propagation.getActiveBaggage();
+        if (activeBaggage) {
+            logger.info({activeBaggage}, 'activeBaggage');
+        } else {
+            propagation.setBaggage(context.active(), propagation.createBaggage({'app.username': {value: 'carluccyo'}}))
+            logger.info({activeBaggage: propagation.getActiveBaggage()}, 'propagation.getActiveBaggage()');
+        }
+
+        const pingConfig = config.get<PingConfig>('ping');
+        if (pingConfig?.enabled) {
+            const axiosResponse = await axios.get(pingConfig.target_service_url);
+            logger.info({status: axiosResponse.status, body: axiosResponse.data}, 'ping response');
+        }
 
 
-    _res.send("TypeScript With Express");
+        _res.send("TypeScript With Express");
+
+        // Be sure to end the span!
+        span.end();
+    });
+
+
 });
 
 // Server setup
