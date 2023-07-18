@@ -3,15 +3,11 @@ import config from "config";
 import {getLogger} from "./logger";
 import axios from "axios";
 import {
-    baggageEntryMetadataFromString,
     Context,
     context,
     propagation,
-    ROOT_CONTEXT,
-    Span,
     trace
 } from "@opentelemetry/api";
-import {AttributeNames} from "@opentelemetry/instrumentation-express";
 
 const app: express.Application = express();
 const port = config.get<number>('server.port');
@@ -76,40 +72,28 @@ function doWork(parent) {
 }
 
 
+
 // Handling '/' Request
 app.get('/ping', async (_req, _res) => {
     // log current timestamp
-    logger.info({headers: _req.headers}, `ping: ${Date.now()}`);
-
+    logger.info({headers: _req.headers, baggage: propagation.getBaggage(context.active())}, `ping: ${Date.now()}`);
 
     const tracer = trace.getTracer(
         'my-service-tracer'
     );
 
     await tracer.startActiveSpan('main', async (span) => {
-
-        let activeBaggage = propagation.getActiveBaggage();
-        if (activeBaggage) {
-            logger.info({activeBaggage}, 'activeBaggage');
-        } else {
-            propagation.setBaggage(context.active(), propagation.createBaggage({'app.username': {value: 'carluccyo'}}))
-            logger.info({activeBaggage: propagation.getActiveBaggage()}, 'propagation.getActiveBaggage()');
-        }
-
-        const pingConfig = config.get<PingConfig>('ping');
-        if (pingConfig?.enabled) {
-            const axiosResponse = await axios.get(pingConfig.target_service_url);
-            logger.info({status: axiosResponse.status, body: axiosResponse.data}, 'ping response');
-        }
-
-
+        const newContext = propagation.setBaggage(context.active(), propagation.createBaggage({'app.username': {value: 'carluccyo'}}));
+        await context.with(newContext, async () => {
+            const pingConfig = config.get<PingConfig>('ping');
+            if (pingConfig?.enabled) {
+                const axiosResponse = await axios.get(pingConfig.target_service_url);
+                logger.info({status: axiosResponse.status, body: axiosResponse.data}, 'ping response');
+            }
+        });
         _res.send("TypeScript With Express");
-
-        // Be sure to end the span!
         span.end();
     });
-
-
 });
 
 // Server setup
